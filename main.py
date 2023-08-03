@@ -1,3 +1,4 @@
+import configparser
 import dash
 import dash_core_components as dcc
 import dash_html_components as html
@@ -7,14 +8,20 @@ import psycopg2
 import plotly.express as px
 
 
-def fetch_data_from_database(selector):
+def load_configuration():
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    return config['database'], {key: int(value) for key, value in config['plot'].items()}
+
+
+def fetch_data_from_database(selector, db_config):
     try:
         conn = psycopg2.connect(
-            host="pixel.ourcloud.ou.edu",
-            port=5432,
-            database="panviz",
-            user="panviz_readonly",
-            password="T3u&c7U58V9H"
+            host=db_config['host'],
+            port=db_config['port'],
+            database=db_config['database'],
+            user=db_config['user'],
+            password=db_config['password']
         )
         cursor = conn.cursor()
         cursor.execute(selector)
@@ -27,14 +34,14 @@ def fetch_data_from_database(selector):
         exit()
 
 
-def main():
+def main(db_config, plot_config):
     selector = 'SELECT "departmento" FROM public."PERUPositiveRawData"'
-    data = fetch_data_from_database(selector)
+    data = fetch_data_from_database(selector, db_config)
     column_names = ['region']
     df_cases = pd.DataFrame(data, columns=column_names)
 
     selector = 'SELECT "departamento" FROM public."PERUDeathRawData"'
-    data = fetch_data_from_database(selector)
+    data = fetch_data_from_database(selector, db_config)
     column_names = ['region']
     df_deaths = pd.DataFrame(data, columns=column_names)
 
@@ -50,17 +57,18 @@ def main():
     merged_df = pd.merge(grouped_df_cases, grouped_df_deaths,
                          on='region', suffixes=('_cases', '_deaths'))
 
-    fig_cases = px.bar(grouped_df_cases, x='region', y='cases',
-                       title='Confirmed Cases by Region', height=400, width=800)
-    fig_deaths = px.bar(grouped_df_deaths, x='region', y='deaths',
-                        title='Confirmed deaths by Region', height=400, width=800)
+    fig_cases = px.bar(grouped_df_cases, x='region', y='cases', title='Confirmed Cases by Region',
+                       height=plot_config['height'], width=plot_config['width'])
+    fig_deaths = px.bar(grouped_df_deaths, x='region', y='deaths', title='Confirmed deaths by Region',
+                        height=plot_config['height'], width=plot_config['width'])
     fig_combined = px.bar(merged_df, x='region', y=[
-                          'cases', 'deaths'], title='Comparison of Cases and Deaths by Region', height=400, width=800)
+                          'cases', 'deaths'], title='Comparison of Cases and Deaths by Region', height=plot_config['height'], width=plot_config['width'])
 
     return fig_cases, fig_deaths, fig_combined
 
 
-fig_cases, fig_deaths, fig_combined = main()
+db_config, plot_config = load_configuration()
+fig_cases, fig_deaths, fig_combined = main(db_config, plot_config)
 
 app = dash.Dash(__name__)
 
