@@ -1,103 +1,94 @@
 import pandas as pd
 import psycopg2
 import plotly.express as px
-import configparser
-
-# Load the configuration from the 'config.ini' file
-
-
-def load_configuration():
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    return config
-
-# Fetch data from the PostgreSQL database based on a given SQL query
-
-
-def fetch_data_from_database(selector, db_config):
-    try:
-        conn = psycopg2.connect(
-            host=db_config['host'],
-            port=db_config['port'],
-            database=db_config['database'],
-            user=db_config['user'],
-            password=db_config['password']
-        )
-        cursor = conn.cursor()
-        cursor.execute(selector)
-        results = cursor.fetchall()
-        cursor.close()  # Close the cursor to release resources
-        conn.close()
-        return results
-    except Exception as err:
-        print("Unable to connect! Exiting! Error:", err)
-        exit()
-
-# Load the cases and deaths data from the database
-
-
-def load_data(db_config):
-    selector_cases = 'SELECT "departmento" FROM public."PERUPositiveRawData"'
-    selector_deaths = 'SELECT "departamento" FROM public."PERUDeathRawData"'
-    data_cases = fetch_data_from_database(selector_cases, db_config)
-    data_deaths = fetch_data_from_database(selector_deaths, db_config)
-    return pd.DataFrame(data_cases, columns=['region']), pd.DataFrame(data_deaths, columns=['region'])
-
-# Preprocess the data by handling missing values and adding aggregation columns
-
-
-def preprocess_data(df_cases, df_deaths):
-    df_cases.dropna(inplace=True)
-    df_deaths.dropna(inplace=True)
-    df_cases['cases'] = 1
-    df_deaths['deaths'] = 1
-    return df_cases, df_deaths
-
-# Transform the data by grouping and merging cases and deaths data
-
-
-def transform_data(df_cases, df_deaths):
-    grouped_cases = df_cases.groupby('region').agg(
-        {'cases': 'sum'}).reset_index()
-    grouped_deaths = df_deaths.groupby('region').agg(
-        {'deaths': 'sum'}).reset_index()
-    return pd.merge(grouped_cases, grouped_deaths, on='region', suffixes=('_cases', '_deaths'))
-
-# Create a bar plot using Plotly Express with specified parameters
-
-
-def create_plot(df, x, y, title, plot_config):
-    return px.bar(df, x=x, y=y, title=title, height=plot_config['height'], width=plot_config['width'])
-
-# Main function to orchestrate the data loading, preprocessing, transformation, and visualization
 
 
 def main():
-    # Load configuration from file
-    config = load_configuration()
-    # Get database configuration
-    db_config = config['database']
-    # Get plot configuration
-    plot_config = {key: int(value) for key, value in config['plot'].items()}
+    # Load the CSV file for Cases
+    selector = 'SELECT "departmento" FROM public."PERUPositiveRawData"'
+    data = fetch_data_from_database(selector)
+    column_names = ['region']
+    df_cases = pd.DataFrame(data, columns=column_names)
 
-    # Load cases and deaths data
-    df_cases, df_deaths = load_data(db_config)
-    df_cases, df_deaths = preprocess_data(
-        df_cases, df_deaths)  # Preprocess the data
-    # Transform the data
-    merged_df = transform_data(df_cases, df_deaths)
+    # load the CSV for Deaths
+    selector = 'SELECT "departamento" FROM public."PERUDeathRawData"'
+    data = fetch_data_from_database(selector)
+    column_names = ['region']
+    df_deaths = pd.DataFrame(data, columns=column_names)
 
-    # Create and show the plots
-    fig_cases = create_plot(df_cases, 'region', 'cases',
-                            'Confirmed Cases by Region', plot_config)
-    fig_deaths = create_plot(
-        df_deaths, 'region', 'deaths', 'Confirmed deaths by Region', plot_config)
-    fig_combined = create_plot(merged_df, 'region', [
-                               'cases', 'deaths'], 'Comparison of Cases and Deaths by Region', plot_config)
+    # 3. Clean and preprocess the data
+    # Handle missing values (if any)
+    df_cases.dropna(inplace=True)
+    df_deaths.dropna(inplace=True)
+    # Add columns for aggregation
+    df_cases['cases'] = 1
+    df_deaths['deaths'] = 1
 
+    # 4. Transform the data into the desired structure
+    # Group by region and calculate summary statistics
+    grouped_df_cases = df_cases.groupby('region').agg(
+        {'cases': 'sum'}).reset_index()
+    grouped_df_deaths = df_deaths.groupby('region').agg(
+        {'deaths': 'sum'}).reset_index()
+
+    # merge dataframes
+    merged_df = pd.merge(grouped_df_cases, grouped_df_deaths,
+                         on='region', suffixes=('_cases', '_deaths'))
+
+    print(merged_df)
+
+    # 7. Validate the prepared data
+    fig_cases = px.bar(grouped_df_cases,
+                       x='region',
+                       y='cases',
+                       title='Confirmed Cases by Region',
+                       height=400,
+                       width=800)
     fig_cases.show()
+
+    fig_deaths = px.bar(grouped_df_deaths,
+                        x='region',
+                        y='deaths',
+                        title='Confirmed deaths by Region',
+                        height=400,
+                        width=800)
     fig_deaths.show()
-    fig_combined.show()
+
+    fig = px.bar(merged_df,
+                 x='region',
+                 y=['cases', 'deaths'],
+                 title='Comparison of Cases and Deaths by Region',
+                 height=400,
+                 width=800)
+
+    fig.show()
+
+
+def fetch_data_from_database(selector):
+    # Try to connect to the database
+    try:
+        conn = psycopg2.connect(
+            host="pixel.ourcloud.ou.edu",
+            port=5432,
+            database="panviz",
+            user="panviz_readonly",
+            password="T3u&c7U58V9H"
+        )
+    except Exception as err:
+        # If the connection fails, print the error message and exit the program
+        print("Unable to connect! Exiting! Error:", err)
+        exit()
+
+    # If the connection is successful, fetch the data
+    cursor = conn.cursor()
+    cursor.execute(selector)
+    results = cursor.fetchall()
+
+    # Close the connection to the database
+    conn.close()
+
+    # Return the fetched data
+    return results
 
 
 if __name__ == "__main__":
